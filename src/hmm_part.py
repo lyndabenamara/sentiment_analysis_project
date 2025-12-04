@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from hmmlearn.hmm import MultinomialHMM
+from hmmlearn.hmm import CategoricalHMM
 
 # Setting up paths to find data and save results
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -47,7 +47,7 @@ def prepare_sequences(df: pd.DataFrame):
 
 def fit_hmm_k(n_states: int, obs_seq: np.ndarray, lengths):
     # training an hmm with k hidden states
-    model = MultinomialHMM(
+    model = CategoricalHMM(
         n_components=n_states,
         n_iter=100,  # how many training iterations
         random_state=42,  # for reproducible results
@@ -120,21 +120,44 @@ def main():
 
     # plotting emission matrix with better labels
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(8, 5))
+    
+    # debug: check the shape and values of emission matrix
+    print(f"\nemission matrix shape: {B.shape}")
+    print(f"emission matrix min/max values: {B.min():.4f} / {B.max():.4f}")
+    print(f"emission matrix first few rows:\n{B[:2, :5] if B.shape[1] >= 5 else B[:2]}")
+    
+    # make sure we're plotting the right dimensions
+    # B should be (n_states, n_observations) where n_observations = 5 (sentiments 0-4)
+    if B.shape[1] == 5:
+        # this is correct - plot as is
+        emission_to_plot = B
+        x_labels = [str(i) for i in range(5)]
+    elif B.shape[0] == 5:
+        # matrix might be transposed - fix it
+        emission_to_plot = B.T
+        x_labels = [str(i) for i in range(5)]
+    else:
+        print(f"warning: unexpected emission matrix shape {B.shape}")
+        emission_to_plot = B
+        x_labels = [str(i) for i in range(B.shape[1])]
+    
     sns.heatmap(
-        B,
+        emission_to_plot,
         annot=True,
-        fmt=".2f",
+        fmt=".3f",  # show 3 decimal places for better precision
         cmap="Greens",
-        yticklabels=[f"state {i}" for i in range(best_k)],
-        xticklabels=[str(i) for i in range(5)],
+        vmin=0,  # explicitly set color range
+        vmax=1,
+        yticklabels=[f"state {i}" for i in range(emission_to_plot.shape[0])],
+        xticklabels=x_labels,
     )
     plt.title(f"emission probabilities (k={best_k})")
     plt.xlabel("observed sentiment (0–4)")
     plt.ylabel("hidden state")
     plt.tight_layout()
     out = REPORTS_DIR / f"hmm_emission_K{best_k}.png"
-    plt.savefig(out)
+    plt.savefig(out, dpi=150)  # higher resolution
     plt.close()
     print(f"saved: {out}")
 
