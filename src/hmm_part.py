@@ -1,3 +1,4 @@
+# Hidden Markov Model for sentiment analysis on movie reviews
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -6,18 +7,21 @@ import pandas as pd
 import seaborn as sns
 from hmmlearn.hmm import MultinomialHMM
 
+# Setting up paths to find data and save results
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_RAW = BASE_DIR / "data" / "raw"
 REPORTS_DIR = BASE_DIR / "reports"
 
 
 def load_data() -> pd.DataFrame:
+    # Looking for the CSV file with the processed movie review data
     csv_path = DATA_RAW / "rt_train.csv"
     if not csv_path.exists():
         raise FileNotFoundError(
             f"{csv_path} not found. Run export_csv.py first to create it."
         )
 
+    # Loading and checking we have all the columns we need
     df = pd.read_csv(csv_path)
     expected_cols = {"PhraseId", "SentenceId", "Phrase", "Sentiment"}
     missing = expected_cols - set(df.columns)
@@ -28,40 +32,43 @@ def load_data() -> pd.DataFrame:
 
 
 def prepare_sequences(df: pd.DataFrame):
-    # Sort so phrases in a sentence are in order
+    # Making sure phrases in each sentence are in the right order
     df_sorted = df.sort_values(["SentenceId", "PhraseId"]).reset_index(drop=True)
 
-    # Observations: sentiment labels 0..4
+    # Observations are the sentiment labels (0=very negative, 4=very positive)
     obs = df_sorted["Sentiment"].astype(int).to_numpy()
-    obs_seq = obs.reshape(-1, 1)
+    obs_seq = obs.reshape(-1, 1)  # hmmlearn wants 2D array
 
-    # Sequence lengths: number of phrases per sentence
+    # Keeping track of how many phrases belong to each sentence
     lengths = df_sorted.groupby("SentenceId").size().tolist()
 
     return df_sorted, obs_seq, lengths
 
 
 def fit_hmm_k(n_states: int, obs_seq: np.ndarray, lengths):
+    # training an hmm with k hidden states
     model = MultinomialHMM(
         n_components=n_states,
-        n_iter=100,
-        random_state=42,
+        n_iter=100,  # how many training iterations
+        random_state=42,  # for reproducible results
     )
-    model.fit(obs_seq, lengths)
-    log_likelihood = model.score(obs_seq, lengths)
+    model.fit(obs_seq, lengths)  # actually train the model
+    log_likelihood = model.score(obs_seq, lengths)  # how well it fits the data
     return model, log_likelihood
 
 
 def compare_k_values(obs_seq, lengths, k_values=(2, 3, 4, 5)):
+    # trying different numbers of hidden states to see which works best
     results = []
     for k in k_values:
         model_k, ll = fit_hmm_k(k, obs_seq, lengths)
         results.append({"n_states": k, "log_likelihood": ll})
-        print(f"K={k}, log-likelihood={ll:.2f}")
+        print(f"k={k}, log-likelihood={ll:.2f}")
     return pd.DataFrame(results)
 
 
 def plot_matrix(mat: np.ndarray, title: str, xlabel: str, ylabel: str, filename: str):
+    # making a nice heatmap to visualize transition or emission matrices
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(6, 4))
     sns.heatmap(mat, annot=True, fmt=".2f", cmap="Blues")
@@ -72,97 +79,99 @@ def plot_matrix(mat: np.ndarray, title: str, xlabel: str, ylabel: str, filename:
     out = REPORTS_DIR / filename
     plt.savefig(out)
     plt.close()
-    print(f"Saved: {out}")
+    print(f"saved: {out}")
 
 
 def main():
+    # running the complete hmm analysis
     df = load_data()
     df_sorted, obs_seq, lengths = prepare_sequences(df)
 
-    print(f"Total observations: {obs_seq.shape[0]}, "
-          f"Number of sentences: {len(lengths)}")
+    print(f"total observations: {obs_seq.shape[0]}, "
+          f"number of sentences: {len(lengths)}")
 
-    print("\nComparing different numbers of hidden states...")
+    print("\ncomparing different numbers of hidden states...")
     results_df = compare_k_values(obs_seq, lengths, k_values=(2, 3, 4, 5))
-    print("\nK vs log-likelihood:")
+    print("\nk vs log-likelihood:")
     print(results_df)
 
-    # Choose a K (e.g., 4) – in a report you can justify this choice
+    # picking k=4 states (you can justify this choice in your report)
     best_k = 4
     model, ll = fit_hmm_k(best_k, obs_seq, lengths)
-    print(f"\nFitted final HMM with K={best_k}, log-likelihood={ll:.2f}")
+    print(f"\nfitted final hmm with k={best_k}, log-likelihood={ll:.2f}")
 
-    # Transition and emission matrices
-    A = model.transmat_
-    B = model.emissionprob_
+    # getting the learned matrices
+    A = model.transmat_  # how states transition to each other
+    B = model.emissionprob_  # what sentiments each state produces
 
-    print("\nTransition matrix A:")
+    print("\ntransition matrix A:")
     print(A)
-    print("\nEmission matrix B (states x observed sentiments 0..4):")
+    print("\nemission matrix B (states x observed sentiments 0..4):")
     print(B)
 
+    # plotting transition matrix
     plot_matrix(
         A,
-        title=f"Transition matrix (K={best_k})",
-        xlabel="Next state",
-        ylabel="Current state",
+        title=f"transition matrix (k={best_k})",
+        xlabel="next state",
+        ylabel="current state",
         filename=f"hmm_transition_K{best_k}.png",
     )
 
-    # For emissions, change labels on x-axis
+    # plotting emission matrix with better labels
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(6, 4))
     sns.heatmap(
-    B,
-    annot=True,
-    fmt=".2f",
-    cmap="Greens",
-    yticklabels=[f"State {i}" for i in range(best_k)],
-    xticklabels=[str(i) for i in range(5)],
-)
-    plt.title(f"Emission probabilities (K={best_k})")
-    plt.xlabel("Observed Sentiment (0–4)")
-    plt.ylabel("Hidden State")
+        B,
+        annot=True,
+        fmt=".2f",
+        cmap="Greens",
+        yticklabels=[f"state {i}" for i in range(best_k)],
+        xticklabels=[str(i) for i in range(5)],
+    )
+    plt.title(f"emission probabilities (k={best_k})")
+    plt.xlabel("observed sentiment (0–4)")
+    plt.ylabel("hidden state")
     plt.tight_layout()
     out = REPORTS_DIR / f"hmm_emission_K{best_k}.png"
     plt.savefig(out)
     plt.close()
-    print(f"Saved: {out}")
+    print(f"saved: {out}")
 
-    # Decode hidden states (Viterbi)
+    # figuring out what hidden state each observation probably came from
     log_prob, hidden_states = model.decode(
         obs_seq,
         lengths=lengths,
         algorithm="viterbi",
     )
-    print(f"\nViterbi log-prob: {log_prob:.2f}")
+    print(f"\nviterbi log-prob: {log_prob:.2f}")
     df_sorted["hidden_state"] = hidden_states
 
-    # Summary: how each hidden state relates to sentiments
+    # seeing what sentiments each hidden state tends to produce
     dist = (
         df_sorted.groupby("hidden_state")["Sentiment"]
         .value_counts(normalize=True)
         .unstack(fill_value=0)
     )
-    print("\nSentiment distribution per hidden state (rows=states, cols=sentiment 0..4):")
+    print("\nsentiment distribution per hidden state (rows=states, cols=sentiment 0..4):")
     print(dist)
 
-    # Save table to CSV for report
+    # saving this analysis for the report
     dist_out = REPORTS_DIR / "hmm_state_sentiment_distribution.csv"
     dist.to_csv(dist_out)
-    print(f"Saved: {dist_out}")
+    print(f"saved: {dist_out}")
 
-    # Simple forecasting example: next sentiment given last state
+    # simple forecasting: predicting the next sentiment based on current state
     last_state = hidden_states[-1]
-    next_state_probs = A[last_state]
-    next_obs_probs = next_state_probs @ B
+    next_state_probs = A[last_state]  # where we'll probably go next
+    next_obs_probs = next_state_probs @ B  # what sentiment that produces
     predicted_label = int(np.argmax(next_obs_probs))
 
-    print("\nForecast example:")
-    print("Last hidden state index:", last_state)
-    print("Next-state distribution:", next_state_probs)
-    print("Next-observation (sentiment) distribution:", next_obs_probs)
-    print("Most likely next sentiment label:", predicted_label)
+    print("\nforecast example:")
+    print("last hidden state index:", last_state)
+    print("next-state distribution:", next_state_probs)
+    print("next-observation (sentiment) distribution:", next_obs_probs)
+    print("most likely next sentiment label:", predicted_label)
 
 
 if __name__ == "__main__":
